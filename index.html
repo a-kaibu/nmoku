@@ -1,0 +1,500 @@
+<title>N目並べ</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<style>
+/* Layout: 碁盤を主役に、横に戦況（目標N・ラウンド履歴）。狭い画面では盤→戦況の縦積み */
+:root {
+  --bg: #e9ebe6;
+  --panel: #f6f7f3;
+  --fg: #1d211c;
+  --muted: #5d6459;
+  --line: #c9cdc3;
+  --accent: #a3361f;      /* 朱：勝利・強調 */
+  --wood: #d9b16a;
+  --wood-dark: #b98c45;
+  --grid: #3b2a14;
+  --display: "Shippori Mincho B1", "Hiragino Mincho ProN", "Yu Mincho", serif;
+  --body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #171a16; --panel: #20241f; --fg: #e8eae3; --muted: #9ba293; --line: #353a32;
+    --accent: #e0694e; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #171a16; --panel: #20241f; --fg: #e8eae3; --muted: #9ba293; --line: #353a32;
+  --accent: #e0694e; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.wrap { max-width: 1060px; margin: 0 auto; display: grid; gap: 20px; grid-template-columns: minmax(0, 1fr) 320px; align-items: start; }
+@media (max-width: 860px) { .wrap { grid-template-columns: minmax(0, 1fr); } }
+header { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; }
+h1 { font-family: var(--display); font-weight: 800; font-size: clamp(28px, 5vw, 40px); margin: 0; letter-spacing: .04em; line-height: 1.1; }
+h1 em { font-style: normal; color: var(--accent); }
+header p { margin: 0; color: var(--muted); }
+
+.board-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.status {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  min-height: 44px;
+}
+#msg { font-weight: 700; font-size: 17px; }
+#msg .stone-ico { margin-right: 6px; }
+.board-box { width: 100%; max-width: 680px; aspect-ratio: 1; position: relative; }
+canvas { width: 100%; height: 100%; display: block; border-radius: 6px; touch-action: manipulation; cursor: pointer;
+  box-shadow: 0 1px 0 rgba(0,0,0,.15), 0 10px 30px -12px rgba(60,40,10,.55); }
+canvas:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+
+.overlay {
+  position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none;
+}
+.overlay .card {
+  pointer-events: auto; background: var(--panel); color: var(--fg); border: 1px solid var(--line);
+  border-radius: 10px; padding: 20px 24px; text-align: center; max-width: 86%;
+  box-shadow: 0 18px 40px -16px rgba(0,0,0,.5);
+  display: grid; gap: 10px; justify-items: center;
+}
+.overlay h2 { font-family: var(--display); margin: 0; font-size: 26px; }
+.overlay p { margin: 0; color: var(--muted); }
+
+button {
+  font: inherit; font-weight: 700; border-radius: 6px; padding: 8px 16px; cursor: pointer;
+  border: 1px solid var(--fg); background: var(--fg); color: var(--bg);
+}
+button.ghost { background: transparent; color: var(--fg); border-color: var(--line); font-weight: 500; }
+button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+button:disabled { opacity: .45; cursor: default; }
+
+aside { display: grid; gap: 16px; min-width: 0; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+.panel h3 { margin: 0 0 10px; font-size: 12px; letter-spacing: .12em; color: var(--muted); font-weight: 700; }
+
+.player { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; align-items: center; padding-block: 8px; }
+.player + .player { border-top: 1px solid var(--line); }
+.player .name { font-weight: 700; }
+.player .who { font-size: 12px; color: var(--muted); }
+.bign { font-family: var(--display); font-weight: 800; font-size: 34px; line-height: 1; font-variant-numeric: tabular-nums; }
+.bign small { font-size: 14px; font-family: var(--body); font-weight: 500; color: var(--muted); margin-left: 2px; }
+.ladder { grid-column: 2 / 4; display: flex; gap: 6px; }
+.ladder span {
+  flex: 1; text-align: center; font-size: 12px; padding: 2px 0; border-radius: 4px;
+  border: 1px solid var(--line); color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.ladder span.done { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.ladder span.now { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+.player.turn .name::after { content: "手番"; margin-left: 8px; font-size: 11px; padding: 1px 6px; border-radius: 3px; background: var(--accent); color: #fff; vertical-align: 2px; }
+
+.stone-ico { display: inline-block; width: 22px; height: 22px; border-radius: 50%; vertical-align: -5px; }
+.stone-ico.b { background: radial-gradient(circle at 35% 30%, #666 0, #111 55%, #000 100%); }
+.stone-ico.w { background: radial-gradient(circle at 35% 30%, #fff 0, #eee 50%, #bbb 100%); border: 1px solid #999; }
+
+ol.log { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 14px; }
+ol.log li { display: grid; grid-template-columns: 3.5em 1fr; gap: 8px; }
+ol.log li .r { color: var(--muted); font-variant-numeric: tabular-nums; }
+ol.log li.empty { display: block; color: var(--muted); }
+
+.rules { font-size: 14px; }
+.rules ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
+.rules b { color: var(--accent); }
+.opts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
+select { font: inherit; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1><em>N</em>目並べ</h1>
+    <p>勝つたびに自分だけ条件が厳しくなる五目並べ。6目で勝てば優勝。</p>
+  </header>
+
+  <div class="board-col">
+    <div class="status">
+      <div id="msg" role="status" aria-live="polite"></div>
+      <div class="opts">
+        <label for="level">CPUの強さ</label>
+        <select id="level">
+          <option value="easy">やさしい</option>
+          <option value="normal" selected>ふつう</option>
+          <option value="hard">つよい</option>
+        </select>
+      </div>
+    </div>
+    <div class="board-box">
+      <canvas id="board" tabindex="0" aria-label="15×15の盤面。クリックで石を置きます"></canvas>
+      <div class="overlay" id="overlay" hidden>
+        <div class="card">
+          <h2 id="ov-title"></h2>
+          <p id="ov-text"></p>
+          <button id="ov-btn" type="button"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <aside>
+    <section class="panel">
+      <h3>目標の目数</h3>
+      <div class="player" id="p-human">
+        <span class="stone-ico b"></span>
+        <div><div class="name">あなた</div><div class="who">黒石</div></div>
+        <div class="bign"><span id="n-human">4</span><small>目</small></div>
+        <div class="ladder" id="l-human"></div>
+      </div>
+      <div class="player" id="p-cpu">
+        <span class="stone-ico w"></span>
+        <div><div class="name">CPU</div><div class="who">白石</div></div>
+        <div class="bign"><span id="n-cpu">4</span><small>目</small></div>
+        <div class="ladder" id="l-cpu"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>ラウンド履歴</h3>
+      <ol class="log" id="log"></ol>
+    </section>
+
+    <section class="panel rules">
+      <h3>ルール</h3>
+      <ul>
+        <li>15×15の盤に交互に石を置き、自分の目標数以上を縦・横・斜めに並べたらラウンド勝利。</li>
+        <li>ラウンドに勝つと<b>自分の目標だけ</b>が1増える（4→5→6）。</li>
+        <li>目標<b>6目</b>の状態でラウンドに勝てば優勝。</li>
+        <li>負けた側が次のラウンドの先手。盤が埋まったら引き分けで目標はそのまま。</li>
+      </ul>
+    </section>
+
+    <button class="ghost" id="reset" type="button">最初からやり直す</button>
+  </aside>
+</div>
+
+<script>
+(() => {
+  const SIZE = 15, START_N = 4, FINAL_N = 6;
+  const EMPTY = 0, HUMAN = 1, CPU = 2;
+  const DIRS = [[1,0],[0,1],[1,1],[1,-1]];
+
+  let S;
+  function freshMatch() {
+    return {
+      n: { [HUMAN]: START_N, [CPU]: START_N },
+      round: 1, first: HUMAN, history: [], ...freshRound(HUMAN), matchOver: false,
+    };
+  }
+  function freshRound(first) {
+    return { board: Array(SIZE*SIZE).fill(EMPTY), turn: first, first, moves: [], winLine: null, roundOver: false };
+  }
+
+  const $ = id => document.getElementById(id);
+  const cvs = $("board"), ctx = cvs.getContext("2d");
+  let hover = -1, cpuTimer = null;
+
+  // ---------- rules ----------
+  const at = (b, x, y) => (x < 0 || y < 0 || x >= SIZE || y >= SIZE) ? -1 : b[y*SIZE+x];
+  function lineAt(b, idx, who) {
+    // longest run through idx for `who`; returns {len, cells}
+    const x0 = idx % SIZE, y0 = (idx / SIZE) | 0;
+    let best = { len: 0, cells: [] };
+    for (const [dx, dy] of DIRS) {
+      const cells = [idx];
+      for (let k = 1; at(b, x0+dx*k, y0+dy*k) === who; k++) cells.push((y0+dy*k)*SIZE + x0+dx*k);
+      for (let k = 1; at(b, x0-dx*k, y0-dy*k) === who; k++) cells.unshift((y0-dy*k)*SIZE + x0-dx*k);
+      if (cells.length > best.len) best = { len: cells.length, cells };
+    }
+    return best;
+  }
+
+  function place(idx) {
+    const who = S.turn;
+    S.board[idx] = who;
+    S.moves.push(idx);
+    const ln = lineAt(S.board, idx, who);
+    if (ln.len >= S.n[who]) return endRound(who, ln.cells);
+    if (S.moves.length === SIZE*SIZE) return endRound(null, null);
+    S.turn = who === HUMAN ? CPU : HUMAN;
+    render();
+    if (S.turn === CPU) scheduleCpu();
+  }
+
+  function endRound(winner, cells) {
+    S.roundOver = true; S.winLine = cells;
+    const atN = winner ? S.n[winner] : null;
+    S.history.push({ round: S.round, winner, atN });
+    if (winner) {
+      if (S.n[winner] >= FINAL_N) S.matchOver = true;
+      else S.n[winner] += 1;
+    }
+    render();
+    showResult(winner, atN);
+  }
+
+  function nextRound() {
+    const last = S.history[S.history.length - 1];
+    // 負けた側が先手。引き分けなら前ラウンドの後手が先手。
+    let first;
+    if (last.winner) first = last.winner === HUMAN ? CPU : HUMAN;
+    else first = S.first === HUMAN ? CPU : HUMAN;
+    Object.assign(S, freshRound(first), { round: S.round + 1 });
+    hideOverlay(); render();
+    if (S.turn === CPU) scheduleCpu();
+  }
+
+  // ---------- CPU ----------
+  // 窓方式：各セルを含む長さN（その手番の目標）の窓ごとに、相手石が無ければ自石数で評価。
+  const ATK = [1e9, 2e5, 2500, 60, 4, 1, 0];   // index = 置いた後あと何個で完成か
+  const DEF = [0, 6e7, 9000, 180, 8, 1, 0];    // index = 相手があと何個で完成か（この点を塞ぐ価値）
+
+  function windowScore(b, idx, who, N, table, afterPlace) {
+    const opp = who === HUMAN ? CPU : HUMAN;
+    const x0 = idx % SIZE, y0 = (idx / SIZE) | 0;
+    let total = 0, hot = 0;
+    for (const [dx, dy] of DIRS) {
+      let dirBest = 99;
+      for (let s = -(N-1); s <= 0; s++) {
+        let own = 0, ok = true;
+        for (let k = 0; k < N; k++) {
+          const x = x0 + dx*(s+k), y = y0 + dy*(s+k);
+          const v = at(b, x, y);
+          if (v === -1 || v === opp) { ok = false; break; }
+          if (v === who) own++;
+        }
+        if (!ok) continue;
+        const rem = afterPlace ? N - own - 1 : N - own;
+        total += table[Math.min(rem, table.length-1)];
+        dirBest = Math.min(dirBest, rem);
+      }
+      if (dirBest <= 1) hot++;
+    }
+    // 2方向以上で「あと1」→ 実質の両取り
+    if (hot >= 2) total += table === ATK ? 5e5 : 2e7;
+    return total;
+  }
+
+  function cpuMove() {
+    const b = S.board, nC = S.n[CPU], nH = S.n[HUMAN];
+    const level = $("level").value;
+    if (S.moves.length === 0) return (SIZE >> 1) * SIZE + (SIZE >> 1);
+    let best = -1, bestScore = -Infinity;
+    const c = (SIZE - 1) / 2;
+    for (let i = 0; i < b.length; i++) {
+      if (b[i] !== EMPTY) continue;
+      if (!hasNeighbor(b, i)) continue;
+      let atk = windowScore(b, i, CPU, nC, ATK, true);
+      let def = windowScore(b, i, HUMAN, nH, DEF, false);
+      if (level === "easy") def *= 0.25;
+      if (level === "hard") def *= 1.15;
+      const x = i % SIZE, y = (i / SIZE) | 0;
+      const center = 3 - (Math.abs(x - c) + Math.abs(y - c)) * 0.2;
+      const noise = Math.random() * (level === "easy" ? 400 : level === "normal" ? 25 : 3);
+      const sc = atk + def + center + noise;
+      if (sc > bestScore) { bestScore = sc; best = i; }
+    }
+    if (level === "easy" && Math.random() < 0.15) {
+      // たまにうっかり
+      const cand = [];
+      for (let i = 0; i < b.length; i++) if (b[i] === EMPTY && hasNeighbor(b, i)) cand.push(i);
+      const mustWin = windowScore(b, best, CPU, nC, ATK, true) >= 1e9;
+      if (!mustWin && cand.length) best = cand[(Math.random() * cand.length) | 0];
+    }
+    return best;
+  }
+  function hasNeighbor(b, i) {
+    const x0 = i % SIZE, y0 = (i / SIZE) | 0;
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      if (!dx && !dy) continue;
+      const v = at(b, x0+dx, y0+dy);
+      if (v > 0) return true;
+    }
+    return false;
+  }
+  function scheduleCpu() {
+    clearTimeout(cpuTimer);
+    cpuTimer = setTimeout(() => {
+      if (S.roundOver || S.turn !== CPU) return;
+      place(cpuMove());
+    }, 380);
+  }
+
+  // ---------- drawing ----------
+  let px = 0, cell = 0, pad = 0;
+  function resize() {
+    const r = cvs.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    px = r.width;
+    cvs.width = Math.round(r.width * dpr); cvs.height = Math.round(r.width * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cell = px / (SIZE + 0.6); pad = cell * 0.8;
+    draw();
+  }
+  const pos = i => [pad + (i % SIZE) * cell, pad + ((i / SIZE) | 0) * cell];
+
+  function draw() {
+    if (!px) return;
+    const g = ctx.createLinearGradient(0, 0, px, px);
+    g.addColorStop(0, "#e2bd76"); g.addColorStop(.5, "#d6aa60"); g.addColorStop(1, "#c99a52");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, px, px);
+    // wood grain
+    ctx.globalAlpha = .07; ctx.strokeStyle = "#5a3a10";
+    for (let i = 0; i < 28; i++) {
+      ctx.beginPath(); ctx.lineWidth = 1 + (i % 3);
+      const y = (i / 28) * px;
+      ctx.moveTo(0, y); ctx.bezierCurveTo(px*.3, y+8, px*.6, y-10, px, y+4); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    // grid
+    ctx.strokeStyle = "#3b2a14"; ctx.lineWidth = Math.max(1, cell * 0.04);
+    for (let k = 0; k < SIZE; k++) {
+      ctx.beginPath(); ctx.moveTo(pad, pad + k*cell); ctx.lineTo(pad + (SIZE-1)*cell, pad + k*cell); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(pad + k*cell, pad); ctx.lineTo(pad + k*cell, pad + (SIZE-1)*cell); ctx.stroke();
+    }
+    ctx.fillStyle = "#3b2a14";
+    for (const [x, y] of [[3,3],[11,3],[7,7],[3,11],[11,11]]) {
+      ctx.beginPath(); ctx.arc(pad + x*cell, pad + y*cell, cell*0.1, 0, 7); ctx.fill();
+    }
+    // win line highlight
+    const win = new Set(S.winLine || []);
+    // stones
+    const R = cell * 0.46;
+    S.board.forEach((v, i) => { if (v) drawStone(i, v, R, 1); });
+    if (hover >= 0 && !S.roundOver && S.turn === HUMAN && S.board[hover] === EMPTY) drawStone(hover, HUMAN, R, .35);
+    // last move marker
+    const last = S.moves[S.moves.length - 1];
+    if (last !== undefined) {
+      const [x, y] = pos(last);
+      ctx.fillStyle = "#c2412a";
+      ctx.beginPath(); ctx.arc(x, y, cell*0.12, 0, 7); ctx.fill();
+    }
+    if (win.size) {
+      const cells = S.winLine;
+      const [x1, y1] = pos(cells[0]), [x2, y2] = pos(cells[cells.length-1]);
+      ctx.strokeStyle = "rgba(194,65,42,.85)"; ctx.lineWidth = cell * 0.16; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+  }
+  function drawStone(i, v, R, alpha) {
+    const [x, y] = pos(i);
+    ctx.globalAlpha = alpha;
+    if (alpha === 1) {
+      ctx.fillStyle = "rgba(0,0,0,.28)";
+      ctx.beginPath(); ctx.arc(x + R*.12, y + R*.16, R, 0, 7); ctx.fill();
+    }
+    const g = ctx.createRadialGradient(x - R*.35, y - R*.4, R*.1, x, y, R);
+    if (v === HUMAN) { g.addColorStop(0, "#6a6a6a"); g.addColorStop(.5, "#1a1a1a"); g.addColorStop(1, "#000"); }
+    else { g.addColorStop(0, "#ffffff"); g.addColorStop(.6, "#ececec"); g.addColorStop(1, "#b9b9b9"); }
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, R, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  function cellFromEvent(e) {
+    const r = cvs.getBoundingClientRect();
+    const x = Math.round((e.clientX - r.left - pad) / cell), y = Math.round((e.clientY - r.top - pad) / cell);
+    if (x < 0 || y < 0 || x >= SIZE || y >= SIZE) return -1;
+    return y * SIZE + x;
+  }
+
+  // ---------- UI ----------
+  function ladder(el, who) {
+    const n = S.n[who];
+    const wins = S.history.filter(h => h.winner === who).length;
+    el.innerHTML = "";
+    for (let k = START_N; k <= FINAL_N; k++) {
+      const s = document.createElement("span");
+      s.textContent = k + "目";
+      const cleared = k < n || (k === FINAL_N && S.matchOver && wins > FINAL_N - START_N);
+      if (cleared) s.className = "done";
+      else if (k === n) s.className = "now";
+      el.appendChild(s);
+    }
+  }
+  function render() {
+    $("n-human").textContent = S.n[HUMAN];
+    $("n-cpu").textContent = S.n[CPU];
+    ladder($("l-human"), HUMAN); ladder($("l-cpu"), CPU);
+    $("p-human").classList.toggle("turn", !S.roundOver && S.turn === HUMAN);
+    $("p-cpu").classList.toggle("turn", !S.roundOver && S.turn === CPU);
+    const msg = $("msg");
+    if (S.roundOver) msg.textContent = `第${S.round}ラウンド終了`;
+    else if (S.turn === HUMAN) msg.innerHTML = `<span class="stone-ico b"></span>第${S.round}ラウンド・あなたの番（${S.n[HUMAN]}目で勝ち）`;
+    else msg.innerHTML = `<span class="stone-ico w"></span>第${S.round}ラウンド・CPUが考え中…`;
+    const log = $("log"); log.innerHTML = "";
+    if (!S.history.length) {
+      const li = document.createElement("li"); li.className = "empty";
+      li.textContent = "まだ決着したラウンドはありません。"; log.appendChild(li);
+    }
+    for (const h of S.history) {
+      const li = document.createElement("li");
+      const who = h.winner === HUMAN ? "あなた" : h.winner === CPU ? "CPU" : null;
+      li.innerHTML = `<span class="r">R${h.round}</span><span>${who ? `${who}が${h.atN}目で勝利` : "引き分け"}</span>`;
+      log.appendChild(li);
+    }
+    draw();
+  }
+  function showResult(winner, atN) {
+    let title, text, btn;
+    if (S.matchOver) {
+      title = winner === HUMAN ? "優勝！" : "CPUの優勝";
+      text = winner === HUMAN ? `6目を並べて勝ち抜きました（全${S.round}ラウンド）。` : `CPUが6目で勝ち抜きました。もう一度挑戦しますか？`;
+      btn = "新しい試合を始める";
+    } else if (!winner) {
+      title = "引き分け"; text = "盤が埋まりました。目標はそのまま、次は手番を入れ替えます。"; btn = "次のラウンドへ";
+    } else {
+      const nn = S.n[winner];
+      title = winner === HUMAN ? "ラウンド勝利" : "CPUの勝ち";
+      text = winner === HUMAN
+        ? `${atN}目達成。あなたの目標は${nn}目に上がります。次はCPUが先手です。`
+        : `CPUが${atN}目を並べました。CPUの目標は${nn}目に。次はあなたが先手です。`;
+      btn = "次のラウンドへ";
+    }
+    $("ov-title").textContent = title; $("ov-text").textContent = text; $("ov-btn").textContent = btn;
+    // 盤面を見られるよう少し遅らせて表示
+    setTimeout(() => { $("overlay").hidden = false; $("ov-btn").focus(); }, 700);
+  }
+  function hideOverlay() { $("overlay").hidden = true; }
+
+  cvs.addEventListener("click", e => {
+    if (S.roundOver || S.turn !== HUMAN) return;
+    const i = cellFromEvent(e);
+    if (i < 0 || S.board[i] !== EMPTY) return;
+    hover = -1; place(i);
+  });
+  cvs.addEventListener("mousemove", e => { const i = cellFromEvent(e); if (i !== hover) { hover = i; draw(); } });
+  cvs.addEventListener("mouseleave", () => { hover = -1; draw(); });
+  // keyboard: arrows move cursor, Enter places
+  cvs.addEventListener("keydown", e => {
+    if (hover < 0) hover = (SIZE >> 1) * SIZE + (SIZE >> 1);
+    let x = hover % SIZE, y = (hover / SIZE) | 0;
+    const m = { ArrowLeft: [-1,0], ArrowRight: [1,0], ArrowUp: [0,-1], ArrowDown: [0,1] }[e.key];
+    if (m) { e.preventDefault(); x = Math.min(SIZE-1, Math.max(0, x+m[0])); y = Math.min(SIZE-1, Math.max(0, y+m[1])); hover = y*SIZE+x; draw(); }
+    else if ((e.key === "Enter" || e.key === " ") && !S.roundOver && S.turn === HUMAN && S.board[hover] === EMPTY) { e.preventDefault(); place(hover); }
+  });
+  $("ov-btn").addEventListener("click", () => {
+    if (S.matchOver) { S = freshMatch(); hideOverlay(); render(); } else nextRound();
+  });
+  let confirmReset = false;
+  $("reset").addEventListener("click", () => {
+    if (!confirmReset) { confirmReset = true; $("reset").textContent = "もう一度押すとリセット"; setTimeout(() => { confirmReset = false; $("reset").textContent = "最初からやり直す"; }, 2500); return; }
+    confirmReset = false; $("reset").textContent = "最初からやり直す";
+    clearTimeout(cpuTimer); S = freshMatch(); hideOverlay(); render();
+  });
+  try { const lv = localStorage.getItem("nmoku-level"); if (lv) $("level").value = lv; } catch (_) {}
+  $("level").addEventListener("change", () => { try { localStorage.setItem("nmoku-level", $("level").value); } catch (_) {} });
+
+  function start(data) {
+    S = data && data.S ? data.S : freshMatch();
+    new ResizeObserver(resize).observe(cvs);
+    resize(); render();
+    if (S.roundOver) showResult(S.history.at(-1)?.winner ?? null, S.history.at(-1)?.atN);
+    else if (S.turn === CPU) scheduleCpu();
+  }
+  window.claude?.hot?.snapshot?.(() => ({ S }));
+  window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});
+  window.__nmoku = { get S() { return S; }, cpuMove, place, HUMAN, CPU };
+})();
+</script>
