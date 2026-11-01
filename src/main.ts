@@ -14,6 +14,7 @@ import {
   type Player,
 } from "./game.ts";
 import { BoardView } from "./render.ts";
+import { loadState, saveState } from "./storage.ts";
 
 const CPU_DELAY_MS = 380;
 const RESULT_DELAY_MS = 700;
@@ -27,7 +28,8 @@ const levelSelect = $<HTMLSelectElement>("level");
 const overlay = $("overlay");
 const resetBtn = $<HTMLButtonElement>("reset");
 
-let state: MatchState = newMatch();
+// リロードしても続きから遊べるよう、保存済みの試合があれば復元する
+let state: MatchState = loadState() ?? newMatch();
 let hover = -1;
 let cpuTimer: ReturnType<typeof setTimeout> | undefined;
 let resultTimer: ReturnType<typeof setTimeout> | undefined;
@@ -104,10 +106,11 @@ function render() {
       }),
     );
   }
+  saveState(state);
   redraw();
 }
 
-function showResult() {
+function showResult(delay = RESULT_DELAY_MS) {
   const last = state.history.at(-1)!;
   const { winner, atN } = last;
   let title: string;
@@ -138,7 +141,7 @@ function showResult() {
   resultTimer = setTimeout(() => {
     overlay.hidden = false;
     $("ov-btn").focus();
-  }, RESULT_DELAY_MS);
+  }, delay);
 }
 
 function restartMatch() {
@@ -231,3 +234,5 @@ new ResizeObserver(() => {
   redraw();
 }).observe(canvas);
 render();
+if (state.roundOver) showResult(0);
+else if (state.turn === CPU) scheduleCpu();
